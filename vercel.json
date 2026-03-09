@@ -4,7 +4,5 @@
   "buildCommand": "npm run build",
   "devCommand": "npm run dev",
   "installCommand": "npm install",
-  "env": {
-    "JWT_SECRET": "@jwt_secret"
-  }
+  "env": {}
 }
