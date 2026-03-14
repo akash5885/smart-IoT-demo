@@ -100,7 +100,7 @@ export default function ChatClient({ user }) {
         </div>
         <div>
           <h1 className="text-xl font-bold text-white">SmartIoT Assistant</h1>
-          <p className="text-xs text-slate-400">Powered by Google Gemini 1.5 Flash (Free) · Can control &amp; monitor your devices</p>
+          <p className="text-xs text-slate-400">Powered by Groq · Llama 3.3 70B (Free) · Can control &amp; monitor your devices</p>
         </div>
       </div>
 

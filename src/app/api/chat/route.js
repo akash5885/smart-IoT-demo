@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Groq from 'groq-sdk';
 import { getSession } from '@/lib/auth';
 import {
   getUserById,
@@ -11,86 +11,82 @@ import {
   updateDeviceStatus,
 } from '@/lib/db';
 
-// ── Tool definitions (Gemini function calling format) ────────────────
-const TOOL_DECLARATIONS = {
-  functionDeclarations: [
-    {
+// ── Tool definitions (OpenAI-compatible format, works with Groq) ─────
+const TOOLS = [
+  {
+    type: 'function',
+    function: {
       name: 'list_devices',
       description:
         'List all IoT devices for the current user with their name, type, location, and online/offline status.',
-      parameters: { type: 'OBJECT', properties: {}, required: [] },
+      parameters: { type: 'object', properties: {}, required: [] },
     },
-    {
+  },
+  {
+    type: 'function',
+    function: {
       name: 'get_device_status',
-      description:
-        'Get the current status and full settings of a specific IoT device.',
+      description: 'Get the current status and full settings of a specific IoT device.',
       parameters: {
-        type: 'OBJECT',
+        type: 'object',
         properties: {
-          device_id: { type: 'STRING', description: 'The device ID (if known)' },
+          device_id: { type: 'string', description: 'The device ID (if known)' },
           device_name: {
-            type: 'STRING',
+            type: 'string',
             description: 'Device name or partial name (e.g. "kitchen light", "thermostat")',
           },
         },
         required: [],
       },
     },
-    {
+  },
+  {
+    type: 'function',
+    function: {
       name: 'get_device_stats',
       description:
         'Retrieve recent sensor readings for a device (temperature, humidity, power usage, etc.).',
       parameters: {
-        type: 'OBJECT',
+        type: 'object',
         properties: {
-          device_id: { type: 'STRING', description: 'The device ID (if known)' },
-          device_name: { type: 'STRING', description: 'Device name or partial name' },
+          device_id: { type: 'string', description: 'The device ID (if known)' },
+          device_name: { type: 'string', description: 'Device name or partial name' },
           limit: {
-            type: 'NUMBER',
+            type: 'number',
             description: 'Number of recent readings to return (default 5, max 24)',
           },
         },
         required: [],
       },
     },
-    {
+  },
+  {
+    type: 'function',
+    function: {
       name: 'control_device',
       description:
-        'Control an IoT device: turn it on/off, toggle power, or update its settings such as brightness, temperature target, color, mode, or recording.',
+        'Control an IoT device: turn it on/off, toggle power, or update settings like brightness, temperature, color, mode, recording.',
       parameters: {
-        type: 'OBJECT',
+        type: 'object',
         properties: {
-          device_id: { type: 'STRING', description: 'The device ID (if known)' },
-          device_name: { type: 'STRING', description: 'Device name or partial name' },
+          device_id: { type: 'string', description: 'The device ID (if known)' },
+          device_name: { type: 'string', description: 'Device name or partial name' },
           action: {
-            type: 'STRING',
+            type: 'string',
             enum: ['turn_on', 'turn_off', 'toggle', 'update_settings'],
-            description: 'Action to perform',
+            description: 'Action to perform on the device',
           },
           settings: {
-            type: 'OBJECT',
+            type: 'object',
             description:
-              'Settings to apply (only for update_settings). E.g. {brightness:80} for lights, {targetTemp:22, mode:"heat"} for thermostats.',
-            properties: {
-              brightness:  { type: 'NUMBER' },
-              color:       { type: 'STRING' },
-              on:          { type: 'BOOLEAN' },
-              targetTemp:  { type: 'NUMBER' },
-              mode:        { type: 'STRING' },
-              motionAlert: { type: 'BOOLEAN' },
-              recording:   { type: 'BOOLEAN' },
-              resolution:  { type: 'STRING' },
-              alertThreshold: { type: 'NUMBER' },
-              unit:        { type: 'STRING' },
-              ratePerKwh:  { type: 'NUMBER' },
-            },
+              'New settings to apply (only for update_settings). E.g. {brightness:80} for lights, {targetTemp:22, mode:"heat"} for thermostats.',
           },
         },
         required: ['action'],
       },
     },
-  ],
-};
+  },
+];
 
 // ── Tool executor ────────────────────────────────────────────────────
 function runTool(name, args, userDevices) {
@@ -123,7 +119,9 @@ function runTool(name, args, userDevices) {
     case 'get_device_status': {
       const d = findDevice(args.device_id, args.device_name);
       if (!d) return { error: `No device found matching "${args.device_name || args.device_id}"` };
-      return { device: { id: d.id, name: d.name, type: d.type, location: d.location, status: d.status, settings: d.settings } };
+      return {
+        device: { id: d.id, name: d.name, type: d.type, location: d.location, status: d.status, settings: d.settings },
+      };
     }
 
     case 'get_device_stats': {
@@ -132,7 +130,11 @@ function runTool(name, args, userDevices) {
       const limit = Math.min(args.limit || 5, 24);
       const stats = getDeviceStats(d.id, limit);
       const latest = stats[stats.length - 1]?.data || null;
-      return { device: { id: d.id, name: d.name, type: d.type, status: d.status }, latest_reading: latest, readings_count: stats.length };
+      return {
+        device: { id: d.id, name: d.name, type: d.type, status: d.status },
+        latest_reading: latest,
+        readings_count: stats.length,
+      };
     }
 
     case 'control_device': {
@@ -150,13 +152,16 @@ function runTool(name, args, userDevices) {
         updateDeviceStatus(d.id, next);
         updateDeviceSettings(d.id, { on: next === 'online' });
       } else if (action === 'update_settings') {
-        if (!settings || Object.keys(settings).length === 0) {
+        if (!settings || Object.keys(settings).length === 0)
           return { error: 'No settings provided for update_settings' };
-        }
         updateDeviceSettings(d.id, settings);
       }
       const updated = getDeviceById(d.id);
-      return { success: true, action, device: { id: updated.id, name: updated.name, status: updated.status, settings: updated.settings } };
+      return {
+        success: true,
+        action,
+        device: { id: updated.id, name: updated.name, status: updated.status, settings: updated.settings },
+      };
     }
 
     default:
@@ -172,8 +177,8 @@ export async function POST(request) {
   const user = getUserById(session.userId);
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 401 });
 
-  if (!process.env.GEMINI_API_KEY) {
-    return NextResponse.json({ error: 'GEMINI_API_KEY is not configured on this server.' }, { status: 503 });
+  if (!process.env.GROQ_API_KEY) {
+    return NextResponse.json({ error: 'GROQ_API_KEY is not configured on this server.' }, { status: 503 });
   }
 
   let body;
@@ -192,63 +197,53 @@ When controlling devices, confirm the action performed and the resulting state.
 Be concise, friendly, and precise. Use the device's actual name from tool results.
 User role: ${user.role}. Total devices available: ${userDevices.length}.`;
 
-  // Convert chat history to Gemini format
-  // Gemini uses 'user' and 'model' roles (not 'assistant')
-  // Gemini also requires history to start with a 'user' message —
-  // so we drop any leading 'model' messages (e.g. the UI greeting).
-  const rawHistory = messages.slice(0, -1).map((m) => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.content }],
-  }));
-  const firstUserIdx = rawHistory.findIndex((m) => m.role === 'user');
-  const history = firstUserIdx >= 0 ? rawHistory.slice(firstUserIdx) : [];
+  // Build message array — skip leading assistant messages (UI greeting)
+  // Keep only from first user message onwards
+  const firstUserIdx = messages.findIndex((m) => m.role === 'user');
+  const trimmedMessages = firstUserIdx >= 0 ? messages.slice(firstUserIdx) : messages;
 
-  const lastUserMessage = messages[messages.length - 1]?.content || '';
+  const apiMessages = [
+    { role: 'system', content: systemPrompt },
+    ...trimmedMessages.map(({ role, content }) => ({ role, content })),
+  ];
+
+  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  const executedTools = [];
+  const MAX_ROUNDS = 6;
 
   try {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      systemInstruction: systemPrompt,
-      tools: [TOOL_DECLARATIONS],
-    });
-
-    const chat = model.startChat({ history });
-
-    // Agentic loop
-    const executedTools = [];
-    let currentMessage = lastUserMessage;
-    let currentResult = await chat.sendMessage(currentMessage);
-    const MAX_ROUNDS = 6;
-
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const response = currentResult.response;
-      const candidate = response.candidates?.[0];
+      const response = await groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: apiMessages,
+        tools: TOOLS,
+        tool_choice: 'auto',
+        temperature: 0.3,
+        max_tokens: 1024,
+      });
 
-      // Check if there are function calls in this response
-      const functionCalls = candidate?.content?.parts
-        ?.filter((p) => p.functionCall)
-        ?.map((p) => p.functionCall) || [];
+      const choice = response.choices[0];
+      const assistantMsg = choice.message;
+      apiMessages.push(assistantMsg);
 
-      if (functionCalls.length === 0) {
-        // Final text answer
-        const text = response.text();
-        return NextResponse.json({ reply: text, toolCalls: executedTools });
+      if (choice.finish_reason !== 'tool_calls') {
+        return NextResponse.json({ reply: assistantMsg.content, toolCalls: executedTools });
       }
 
-      // Execute all function calls and collect results
-      const functionResponses = [];
-      for (const fc of functionCalls) {
-        let args = fc.args || {};
-        const result = runTool(fc.name, args, userDevices);
-        executedTools.push({ name: fc.name, args, result });
-        functionResponses.push({
-          functionResponse: { name: fc.name, response: result },
+      // Execute all tool calls
+      for (const tc of assistantMsg.tool_calls) {
+        let args = {};
+        try { args = JSON.parse(tc.function.arguments); } catch {}
+
+        const result = runTool(tc.function.name, args, userDevices);
+        executedTools.push({ name: tc.function.name, args, result });
+
+        apiMessages.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: JSON.stringify(result),
         });
       }
-
-      // Send tool results back to the model
-      currentResult = await chat.sendMessage(functionResponses);
     }
 
     return NextResponse.json({
@@ -256,7 +251,7 @@ User role: ${user.role}. Total devices available: ${userDevices.length}.`;
       toolCalls: executedTools,
     });
   } catch (err) {
-    console.error('Gemini error:', err);
+    console.error('Groq error:', err);
     return NextResponse.json({ error: err?.message || 'AI request failed' }, { status: 500 });
   }
 }
