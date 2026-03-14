@@ -194,10 +194,14 @@ User role: ${user.role}. Total devices available: ${userDevices.length}.`;
 
   // Convert chat history to Gemini format
   // Gemini uses 'user' and 'model' roles (not 'assistant')
-  const history = messages.slice(0, -1).map((m) => ({
+  // Gemini also requires history to start with a 'user' message —
+  // so we drop any leading 'model' messages (e.g. the UI greeting).
+  const rawHistory = messages.slice(0, -1).map((m) => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }],
   }));
+  const firstUserIdx = rawHistory.findIndex((m) => m.role === 'user');
+  const history = firstUserIdx >= 0 ? rawHistory.slice(firstUserIdx) : [];
 
   const lastUserMessage = messages[messages.length - 1]?.content || '';
 
