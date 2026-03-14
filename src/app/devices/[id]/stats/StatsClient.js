@@ -6,13 +6,11 @@ import {
   LineChart, Line, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
-import { ArrowLeft, Settings2, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Settings2, RefreshCw, Loader2, AlertCircle } from 'lucide-react';
 
 function formatTime(isoString) {
   return new Date(isoString).toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
+    hour: '2-digit', minute: '2-digit', hour12: false,
   });
 }
 
@@ -20,38 +18,68 @@ const CHART_COLORS = {
   primary: '#3b82f6',
   secondary: '#10b981',
   tertiary: '#f59e0b',
-  quaternary: '#ef4444',
 };
 
-export default function StatsClient({ device, initialStats }) {
-  const [stats, setStats] = useState(initialStats);
-  const [loading, setLoading] = useState(false);
+export default function StatsClient({ deviceId }) {
+  const [device, setDevice] = useState(null);
+  const [stats, setStats] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const fetchStats = useCallback(async () => {
-    setLoading(true);
+  const fetchStats = useCallback(async (isAuto = false) => {
+    if (!isAuto) setRefreshing(true);
     try {
-      const res = await fetch(`/api/devices/${device.id}/stats?limit=24`);
+      const res = await fetch(`/api/devices/${deviceId}/stats?limit=24`);
+      const data = await res.json();
       if (res.ok) {
-        const data = await res.json();
+        setDevice(data.device);
         setStats(data.stats);
+        setError('');
+      } else {
+        setError(data.error || 'Failed to load stats');
       }
+    } catch {
+      setError('Network error');
     } finally {
+      setRefreshing(false);
       setLoading(false);
     }
-  }, [device.id]);
+  }, [deviceId]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const interval = setInterval(fetchStats, 5000);
+    const interval = setInterval(() => fetchStats(true), 5000);
     return () => clearInterval(interval);
   }, [autoRefresh, fetchStats]);
 
-  const chartData = stats.map((s) => ({
-    time: formatTime(s.timestamp),
-    ...s.data,
-  }));
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+      </div>
+    );
+  }
 
+  if (error || !device) {
+    return (
+      <div className="max-w-md mx-auto mt-16 text-center">
+        <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+        <h2 className="text-lg font-semibold text-white mb-2">Device Not Found</h2>
+        <p className="text-slate-400 text-sm mb-6">{error || 'This device does not exist or you do not have access.'}</p>
+        <Link href="/devices" className="btn-primary inline-flex items-center gap-2">
+          <ArrowLeft className="w-4 h-4" /> Back to Devices
+        </Link>
+      </div>
+    );
+  }
+
+  const chartData = stats.map((s) => ({ time: formatTime(s.timestamp), ...s.data }));
   const latest = stats[stats.length - 1]?.data || {};
 
   return (
@@ -79,8 +107,8 @@ export default function StatsClient({ device, initialStats }) {
             <RefreshCw className={`w-4 h-4 ${autoRefresh ? 'animate-spin' : ''}`} />
             {autoRefresh ? 'Live' : 'Auto'}
           </button>
-          <button onClick={fetchStats} disabled={loading} className="btn-secondary text-sm flex items-center gap-2">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <button onClick={() => fetchStats()} disabled={refreshing} className="btn-secondary text-sm flex items-center gap-2">
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
             Refresh
           </button>
           <Link href={`/devices/${device.id}/control`} className="btn-primary flex items-center gap-2 text-sm">
@@ -89,10 +117,7 @@ export default function StatsClient({ device, initialStats }) {
         </div>
       </div>
 
-      {/* Latest values */}
       <LatestValues device={device} data={latest} />
-
-      {/* Charts */}
       <Charts device={device} chartData={chartData} />
     </div>
   );
@@ -100,7 +125,7 @@ export default function StatsClient({ device, initialStats }) {
 
 function LatestValues({ device, data }) {
   const cards = getLatestValueCards(device.type, data);
-
+  if (cards.length === 0) return null;
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       {cards.map(({ label, value, unit, color }) => (
@@ -156,10 +181,12 @@ function Charts({ device, chartData }) {
   if (chartData.length === 0) {
     return (
       <div className="card text-center py-12 text-slate-400">
-        No statistics available yet. Data will appear here as the device reports.
+        No statistics available yet.
       </div>
     );
   }
+
+  const tooltipStyle = { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' };
 
   switch (device.type) {
     case 'temperature_sensor':
@@ -171,7 +198,7 @@ function Charts({ device, chartData }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="time" stroke="#64748b" fontSize={11} />
               <YAxis stroke="#64748b" fontSize={11} />
-              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+              <Tooltip contentStyle={tooltipStyle} />
               <Area type="monotone" dataKey="temperature" stroke={CHART_COLORS.primary} fill={CHART_COLORS.primary + '20'} name="Temperature (°C)" dot={false} />
             </AreaChart>
           </ChartCard>
@@ -180,7 +207,7 @@ function Charts({ device, chartData }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="time" stroke="#64748b" fontSize={11} />
               <YAxis stroke="#64748b" fontSize={11} />
-              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+              <Tooltip contentStyle={tooltipStyle} />
               <Area type="monotone" dataKey="humidity" stroke={CHART_COLORS.secondary} fill={CHART_COLORS.secondary + '20'} name="Humidity (%)" dot={false} />
             </AreaChart>
           </ChartCard>
@@ -194,7 +221,7 @@ function Charts({ device, chartData }) {
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
             <XAxis dataKey="time" stroke="#64748b" fontSize={11} />
             <YAxis stroke="#64748b" fontSize={11} />
-            <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+            <Tooltip contentStyle={tooltipStyle} />
             <Legend />
             <Line type="monotone" dataKey="currentTemp" stroke={CHART_COLORS.primary} name="Current (°C)" dot={false} strokeWidth={2} />
             <Line type="monotone" dataKey="targetTemp" stroke={CHART_COLORS.tertiary} name="Target (°C)" dot={false} strokeWidth={2} strokeDasharray="5 5" />
@@ -210,7 +237,7 @@ function Charts({ device, chartData }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="time" stroke="#64748b" fontSize={11} />
               <YAxis stroke="#64748b" fontSize={11} />
-              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+              <Tooltip contentStyle={tooltipStyle} />
               <Area type="monotone" dataKey="brightness" stroke="#f59e0b" fill="#f59e0b20" name="Brightness (%)" dot={false} />
             </AreaChart>
           </ChartCard>
@@ -219,7 +246,7 @@ function Charts({ device, chartData }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="time" stroke="#64748b" fontSize={11} />
               <YAxis stroke="#64748b" fontSize={11} />
-              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+              <Tooltip contentStyle={tooltipStyle} />
               <Area type="monotone" dataKey="powerUsage" stroke={CHART_COLORS.secondary} fill={CHART_COLORS.secondary + '20'} name="Power (W)" dot={false} />
             </AreaChart>
           </ChartCard>
@@ -234,7 +261,7 @@ function Charts({ device, chartData }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="time" stroke="#64748b" fontSize={11} />
               <YAxis stroke="#64748b" fontSize={11} />
-              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+              <Tooltip contentStyle={tooltipStyle} />
               <Area type="monotone" dataKey="powerUsage" stroke={CHART_COLORS.secondary} fill={CHART_COLORS.secondary + '20'} name="Power (kW)" dot={false} />
             </AreaChart>
           </ChartCard>
@@ -243,7 +270,7 @@ function Charts({ device, chartData }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="time" stroke="#64748b" fontSize={11} />
               <YAxis stroke="#64748b" fontSize={11} />
-              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+              <Tooltip contentStyle={tooltipStyle} />
               <Legend />
               <Line type="monotone" dataKey="voltage" stroke={CHART_COLORS.primary} name="Voltage (V)" dot={false} strokeWidth={2} />
               <Line type="monotone" dataKey="current" stroke={CHART_COLORS.tertiary} name="Current (A)" dot={false} strokeWidth={2} />

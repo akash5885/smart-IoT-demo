@@ -2,19 +2,18 @@ import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
 import { getUserById } from '@/lib/db';
 import AppShell from '@/components/AppShell';
-import StatsClient from './StatsClient';
+import ChatClient from './ChatClient';
 
-export default async function StatsPage({ params }) {
+export default async function ChatPage() {
   const session = await getSession();
   if (!session) redirect('/login');
 
   const user = getUserById(session.userId);
   if (!user) redirect('/login');
 
-  // Device lookup is done client-side to avoid serverless in-memory isolation issues
   return (
     <AppShell user={user}>
-      <StatsClient deviceId={params.id} />
+      <ChatClient user={user} />
     </AppShell>
   );
 }

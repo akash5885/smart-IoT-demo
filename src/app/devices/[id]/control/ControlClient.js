@@ -1,23 +1,40 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
-  ArrowLeft, BarChart2, Wifi, WifiOff, Save,
+  ArrowLeft, BarChart2, Save, Loader2, AlertCircle,
   Lightbulb, Thermometer, Camera, Zap, Droplets, Plug, Cpu
 } from 'lucide-react';
 
-export default function ControlClient({ device: initialDevice, user }) {
-  const [device, setDevice] = useState(initialDevice);
-  const [settings, setSettings] = useState(initialDevice.settings);
+export default function ControlClient({ deviceId, user }) {
+  const [device, setDevice] = useState(null);
+  const [settings, setSettings] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    fetch(`/api/devices/${deviceId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.device) {
+          setDevice(data.device);
+          setSettings(data.device.settings || {});
+        } else {
+          setError(data.error || 'Device not found');
+        }
+      })
+      .catch(() => setError('Failed to load device'))
+      .finally(() => setLoading(false));
+  }, [deviceId]);
 
   async function sendControl(payload) {
     setSaving(true);
     setMessage('');
     try {
-      const res = await fetch(`/api/devices/${device.id}/control`, {
+      const res = await fetch(`/api/devices/${deviceId}/control`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -39,8 +56,30 @@ export default function ControlClient({ device: initialDevice, user }) {
   }
 
   async function toggleStatus() {
+    if (!device) return;
     const newStatus = device.status === 'online' ? 'offline' : 'online';
     await sendControl({ action: 'toggle_status', status: newStatus });
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-md mx-auto mt-16 text-center">
+        <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+        <h2 className="text-lg font-semibold text-white mb-2">Device Not Found</h2>
+        <p className="text-slate-400 text-sm mb-6">{error}</p>
+        <Link href="/devices" className="btn-primary inline-flex items-center gap-2">
+          <ArrowLeft className="w-4 h-4" /> Back to Devices
+        </Link>
+      </div>
+    );
   }
 
   const isReadOnly = user.role === 'support';
@@ -95,26 +134,17 @@ export default function ControlClient({ device: initialDevice, user }) {
               Toggle device {device.status === 'online' ? 'offline' : 'online'}
             </p>
           </div>
-          {!isReadOnly && (
-            <button
-              onClick={toggleStatus}
-              disabled={saving}
-              className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
-                device.status === 'online' ? 'bg-emerald-500' : 'bg-slate-600'
-              }`}
-            >
-              <span
-                className={`inline-block h-5 w-5 rounded-full bg-white shadow-md transform transition-transform ${
-                  device.status === 'online' ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
-          )}
-          {isReadOnly && (
-            <div className={`relative inline-flex h-7 w-12 items-center rounded-full ${device.status === 'online' ? 'bg-emerald-500' : 'bg-slate-600'}`}>
-              <span className={`inline-block h-5 w-5 rounded-full bg-white shadow-md transform ${device.status === 'online' ? 'translate-x-6' : 'translate-x-1'}`} />
-            </div>
-          )}
+          <button
+            onClick={toggleStatus}
+            disabled={saving || isReadOnly}
+            className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors disabled:opacity-50 ${
+              device.status === 'online' ? 'bg-emerald-500' : 'bg-slate-600'
+            }`}
+          >
+            <span className={`inline-block h-5 w-5 rounded-full bg-white shadow-md transform transition-transform ${
+              device.status === 'online' ? 'translate-x-6' : 'translate-x-1'
+            }`} />
+          </button>
         </div>
       </div>
 
@@ -143,29 +173,11 @@ function DeviceControls({ device, settings, setSettings, onSave, saving, isReadO
           <h3 className="font-medium text-white flex items-center gap-2">
             <Lightbulb className="w-4 h-4 text-yellow-400" /> Light Controls
           </h3>
-          <Toggle
-            label="Power"
-            value={settings.on}
-            onChange={(v) => setSettings({ ...settings, on: v })}
-            disabled={isReadOnly}
-          />
-          <RangeControl
-            label="Brightness"
-            value={settings.brightness || 100}
-            min={1} max={100}
-            unit="%"
-            onChange={(v) => setSettings({ ...settings, brightness: v })}
-            disabled={isReadOnly}
-          />
+          <Toggle label="Power" value={settings.on} onChange={(v) => setSettings({ ...settings, on: v })} disabled={isReadOnly} />
+          <RangeControl label="Brightness" value={settings.brightness ?? 100} min={1} max={100} unit="%" onChange={(v) => setSettings({ ...settings, brightness: v })} disabled={isReadOnly} />
           <div>
             <label className="label">Color</label>
-            <input
-              type="color"
-              disabled={isReadOnly}
-              value={settings.color || '#ffffff'}
-              onChange={(e) => setSettings({ ...settings, color: e.target.value })}
-              className="h-10 w-full rounded-lg border border-slate-600 bg-slate-700 cursor-pointer disabled:opacity-50"
-            />
+            <input type="color" disabled={isReadOnly} value={settings.color || '#ffffff'} onChange={(e) => setSettings({ ...settings, color: e.target.value })} className="h-10 w-full rounded-lg border border-slate-600 bg-slate-700 cursor-pointer disabled:opacity-50" />
           </div>
           {!isReadOnly && <SaveButton onClick={handleSave} saving={saving} />}
         </div>
@@ -177,28 +189,11 @@ function DeviceControls({ device, settings, setSettings, onSave, saving, isReadO
           <h3 className="font-medium text-white flex items-center gap-2">
             <Thermometer className="w-4 h-4 text-blue-400" /> Thermostat Controls
           </h3>
-          <Toggle
-            label="Active"
-            value={settings.on}
-            onChange={(v) => setSettings({ ...settings, on: v })}
-            disabled={isReadOnly}
-          />
-          <RangeControl
-            label="Target Temperature"
-            value={settings.targetTemp || 21}
-            min={16} max={30}
-            unit="°C"
-            onChange={(v) => setSettings({ ...settings, targetTemp: v })}
-            disabled={isReadOnly}
-          />
+          <Toggle label="Active" value={settings.on} onChange={(v) => setSettings({ ...settings, on: v })} disabled={isReadOnly} />
+          <RangeControl label="Target Temperature" value={settings.targetTemp ?? 21} min={16} max={30} unit="°C" onChange={(v) => setSettings({ ...settings, targetTemp: v })} disabled={isReadOnly} />
           <div>
             <label className="label">Mode</label>
-            <select
-              disabled={isReadOnly}
-              className="input-field"
-              value={settings.mode || 'auto'}
-              onChange={(e) => setSettings({ ...settings, mode: e.target.value })}
-            >
+            <select disabled={isReadOnly} className="input-field" value={settings.mode || 'auto'} onChange={(e) => setSettings({ ...settings, mode: e.target.value })}>
               <option value="auto">Auto</option>
               <option value="heat">Heat</option>
               <option value="cool">Cool</option>
@@ -215,26 +210,11 @@ function DeviceControls({ device, settings, setSettings, onSave, saving, isReadO
           <h3 className="font-medium text-white flex items-center gap-2">
             <Camera className="w-4 h-4 text-purple-400" /> Camera Controls
           </h3>
-          <Toggle
-            label="Motion Alerts"
-            value={settings.motionAlert}
-            onChange={(v) => setSettings({ ...settings, motionAlert: v })}
-            disabled={isReadOnly}
-          />
-          <Toggle
-            label="Recording"
-            value={settings.recording}
-            onChange={(v) => setSettings({ ...settings, recording: v })}
-            disabled={isReadOnly}
-          />
+          <Toggle label="Motion Alerts" value={settings.motionAlert} onChange={(v) => setSettings({ ...settings, motionAlert: v })} disabled={isReadOnly} />
+          <Toggle label="Recording" value={settings.recording} onChange={(v) => setSettings({ ...settings, recording: v })} disabled={isReadOnly} />
           <div>
             <label className="label">Resolution</label>
-            <select
-              disabled={isReadOnly}
-              className="input-field"
-              value={settings.resolution || '1080p'}
-              onChange={(e) => setSettings({ ...settings, resolution: e.target.value })}
-            >
+            <select disabled={isReadOnly} className="input-field" value={settings.resolution || '1080p'} onChange={(e) => setSettings({ ...settings, resolution: e.target.value })}>
               <option value="480p">480p</option>
               <option value="720p">720p (HD)</option>
               <option value="1080p">1080p (Full HD)</option>
@@ -251,12 +231,7 @@ function DeviceControls({ device, settings, setSettings, onSave, saving, isReadO
           <h3 className="font-medium text-white flex items-center gap-2">
             <Plug className="w-4 h-4 text-red-400" /> Smart Plug Controls
           </h3>
-          <Toggle
-            label="Power"
-            value={settings.on}
-            onChange={(v) => setSettings({ ...settings, on: v })}
-            disabled={isReadOnly}
-          />
+          <Toggle label="Power" value={settings.on} onChange={(v) => setSettings({ ...settings, on: v })} disabled={isReadOnly} />
           {!isReadOnly && <SaveButton onClick={handleSave} saving={saving} />}
         </div>
       );
@@ -268,23 +243,11 @@ function DeviceControls({ device, settings, setSettings, onSave, saving, isReadO
           <h3 className="font-medium text-white flex items-center gap-2">
             <Thermometer className="w-4 h-4 text-orange-400" /> Sensor Settings
           </h3>
-          <RangeControl
-            label="Alert Threshold"
-            value={settings.alertThreshold || 35}
-            min={10} max={60}
-            unit={device.type === 'humidity_sensor' ? '%' : '°C'}
-            onChange={(v) => setSettings({ ...settings, alertThreshold: v })}
-            disabled={isReadOnly}
-          />
+          <RangeControl label="Alert Threshold" value={settings.alertThreshold ?? 35} min={10} max={60} unit={device.type === 'humidity_sensor' ? '%' : '°C'} onChange={(v) => setSettings({ ...settings, alertThreshold: v })} disabled={isReadOnly} />
           {device.type === 'temperature_sensor' && (
             <div>
               <label className="label">Unit</label>
-              <select
-                disabled={isReadOnly}
-                className="input-field"
-                value={settings.unit || 'celsius'}
-                onChange={(e) => setSettings({ ...settings, unit: e.target.value })}
-              >
+              <select disabled={isReadOnly} className="input-field" value={settings.unit || 'celsius'} onChange={(e) => setSettings({ ...settings, unit: e.target.value })}>
                 <option value="celsius">Celsius (°C)</option>
                 <option value="fahrenheit">Fahrenheit (°F)</option>
               </select>
@@ -302,24 +265,9 @@ function DeviceControls({ device, settings, setSettings, onSave, saving, isReadO
           </h3>
           <div>
             <label className="label">Rate per kWh ($)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              disabled={isReadOnly}
-              className="input-field"
-              value={settings.ratePerKwh || 0.12}
-              onChange={(e) => setSettings({ ...settings, ratePerKwh: parseFloat(e.target.value) })}
-            />
+            <input type="number" step="0.01" min="0" disabled={isReadOnly} className="input-field" value={settings.ratePerKwh ?? 0.12} onChange={(e) => setSettings({ ...settings, ratePerKwh: parseFloat(e.target.value) })} />
           </div>
-          <RangeControl
-            label="Alert Threshold (kW)"
-            value={settings.alertThreshold || 10}
-            min={1} max={50}
-            unit=" kW"
-            onChange={(v) => setSettings({ ...settings, alertThreshold: v })}
-            disabled={isReadOnly}
-          />
+          <RangeControl label="Alert Threshold (kW)" value={settings.alertThreshold ?? 10} min={1} max={50} unit=" kW" onChange={(v) => setSettings({ ...settings, alertThreshold: v })} disabled={isReadOnly} />
           {!isReadOnly && <SaveButton onClick={handleSave} saving={saving} />}
         </div>
       );
@@ -338,19 +286,9 @@ function Toggle({ label, value, onChange, disabled }) {
   return (
     <div className="flex items-center justify-between">
       <span className="text-sm text-slate-300">{label}</span>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => onChange(!value)}
-        className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors disabled:opacity-50 ${
-          value ? 'bg-blue-600' : 'bg-slate-600'
-        }`}
-      >
-        <span
-          className={`inline-block h-5 w-5 rounded-full bg-white shadow-md transform transition-transform ${
-            value ? 'translate-x-6' : 'translate-x-1'
-          }`}
-        />
+      <button type="button" disabled={disabled} onClick={() => onChange(!value)}
+        className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors disabled:opacity-50 ${value ? 'bg-blue-600' : 'bg-slate-600'}`}>
+        <span className={`inline-block h-5 w-5 rounded-full bg-white shadow-md transform transition-transform ${value ? 'translate-x-6' : 'translate-x-1'}`} />
       </button>
     </div>
   );
@@ -361,22 +299,11 @@ function RangeControl({ label, value, min, max, unit, onChange, disabled }) {
     <div>
       <div className="flex justify-between mb-2">
         <label className="label mb-0">{label}</label>
-        <span className="text-sm font-medium text-white">
-          {value}{unit}
-        </span>
+        <span className="text-sm font-medium text-white">{value}{unit}</span>
       </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-blue-500 disabled:opacity-50"
-      />
+      <input type="range" min={min} max={max} value={value} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))} className="w-full accent-blue-500 disabled:opacity-50" />
       <div className="flex justify-between text-xs text-slate-500 mt-1">
-        <span>{min}{unit}</span>
-        <span>{max}{unit}</span>
+        <span>{min}{unit}</span><span>{max}{unit}</span>
       </div>
     </div>
   );

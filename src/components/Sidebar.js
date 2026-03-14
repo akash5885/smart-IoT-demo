@@ -10,12 +10,14 @@ import {
   LogOut,
   Wifi,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'support', 'user'] },
   { href: '/devices', label: 'My Devices', icon: Cpu, roles: ['admin', 'support', 'user'] },
   { href: '/devices/register', label: 'Add Device', icon: PlusCircle, roles: ['user', 'admin'] },
+  { href: '/chat', label: 'AI Assistant', icon: Sparkles, roles: ['admin', 'support', 'user'] },
   { href: '/admin/users', label: 'User Management', icon: Users, roles: ['admin'] },
   { href: '/admin/devices', label: 'All Devices', icon: ShieldCheck, roles: ['admin', 'support'] },
 ];
