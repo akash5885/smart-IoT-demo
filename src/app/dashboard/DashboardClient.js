@@ -1,10 +1,27 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Cpu, Wifi, WifiOff, Users, PlusCircle, ArrowRight } from 'lucide-react';
+import { Cpu, Wifi, WifiOff, Users, PlusCircle, ArrowRight, Loader2 } from 'lucide-react';
 import DeviceCard from '@/components/DeviceCard';
 
-export default function DashboardClient({ user, devices, stats }) {
+export default function DashboardClient({ user, totalUsers }) {
+  const [devices, setDevices] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/devices')
+      .then((r) => r.json())
+      .then((data) => { if (data.devices) setDevices(data.devices); })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const stats = {
+    totalDevices: devices.length,
+    onlineDevices: devices.filter((d) => d.status === 'online').length,
+    offlineDevices: devices.filter((d) => d.status === 'offline').length,
+  };
+
   const recentDevices = devices.slice(0, 4);
 
   return (
@@ -21,31 +38,11 @@ export default function DashboardClient({ user, devices, stats }) {
 
       {/* Stats cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard
-          icon={Cpu}
-          label="Total Devices"
-          value={stats.totalDevices}
-          color="text-blue-400 bg-blue-400/10"
-        />
-        <StatCard
-          icon={Wifi}
-          label="Online"
-          value={stats.onlineDevices}
-          color="text-emerald-400 bg-emerald-400/10"
-        />
-        <StatCard
-          icon={WifiOff}
-          label="Offline"
-          value={stats.offlineDevices}
-          color="text-red-400 bg-red-400/10"
-        />
+        <StatCard icon={Cpu}    label="Total Devices" value={loading ? '…' : stats.totalDevices}  color="text-blue-400 bg-blue-400/10" />
+        <StatCard icon={Wifi}   label="Online"        value={loading ? '…' : stats.onlineDevices}  color="text-emerald-400 bg-emerald-400/10" />
+        <StatCard icon={WifiOff} label="Offline"      value={loading ? '…' : stats.offlineDevices} color="text-red-400 bg-red-400/10" />
         {['admin', 'support'].includes(user.role) ? (
-          <StatCard
-            icon={Users}
-            label="Total Users"
-            value={stats.totalUsers}
-            color="text-purple-400 bg-purple-400/10"
-          />
+          <StatCard icon={Users} label="Total Users" value={totalUsers} color="text-purple-400 bg-purple-400/10" />
         ) : (
           <div className="card flex flex-col items-center justify-center text-center">
             <Link href="/devices/register" className="flex flex-col items-center gap-2 text-slate-400 hover:text-blue-400 transition-colors">
@@ -66,7 +63,11 @@ export default function DashboardClient({ user, devices, stats }) {
         </Link>
       </div>
 
-      {recentDevices.length === 0 ? (
+      {loading ? (
+        <div className="flex items-center justify-center h-40">
+          <Loader2 className="w-7 h-7 text-blue-400 animate-spin" />
+        </div>
+      ) : recentDevices.length === 0 ? (
         <div className="card text-center py-12">
           <Cpu className="w-12 h-12 text-slate-600 mx-auto mb-3" />
           <p className="text-slate-400 mb-4">No devices registered yet</p>

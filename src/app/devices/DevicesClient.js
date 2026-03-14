@@ -1,16 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PlusCircle, Cpu, Search } from 'lucide-react';
+import { PlusCircle, Cpu, Search, Loader2 } from 'lucide-react';
 import DeviceCard from '@/components/DeviceCard';
 
-export default function DevicesClient({ user, initialDevices }) {
+export default function DevicesClient({ user }) {
   const router = useRouter();
-  const [devices, setDevices] = useState(initialDevices);
+  const [devices, setDevices] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
+
+  useEffect(() => {
+    fetch('/api/devices')
+      .then((r) => r.json())
+      .then((data) => { if (data.devices) setDevices(data.devices); })
+      .finally(() => setLoading(false));
+  }, []);
 
   const filtered = devices.filter((d) => {
     const matchSearch =
@@ -38,7 +46,9 @@ export default function DevicesClient({ user, initialDevices }) {
           <h1 className="text-2xl font-bold text-white">
             {['admin', 'support'].includes(user.role) ? 'All Devices' : 'My Devices'}
           </h1>
-          <p className="text-slate-400 text-sm mt-1">{devices.length} device{devices.length !== 1 ? 's' : ''} registered</p>
+          <p className="text-slate-400 text-sm mt-1">
+            {loading ? 'Loading…' : `${devices.length} device${devices.length !== 1 ? 's' : ''} registered`}
+          </p>
         </div>
         {user.role !== 'support' && (
           <Link href="/devices/register" className="btn-primary flex items-center gap-2 self-start sm:self-auto">
@@ -70,7 +80,11 @@ export default function DevicesClient({ user, initialDevices }) {
         </select>
       </div>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="flex items-center justify-center h-48">
+          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="card text-center py-16">
           <Cpu className="w-12 h-12 text-slate-600 mx-auto mb-3" />
           <p className="text-slate-400 mb-4">
